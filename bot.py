@@ -1,52 +1,46 @@
-import asyncio, sqlite3, os, re
+import asyncio, sqlite3, osimport asyncio, sqlite3, os, re
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiohttp import web
 
 from config import BOT_TOKEN, DB_PATH
-from modules.fssp import check_fssp  # Импорт ФССП
+from modules.phone import analyze_phone
+from modules.fssp import check_fssp
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
 os.makedirs("data", exist_ok=True)
 conn = sqlite3.connect(DB_PATH)
+
+# Таблица логов запросов
 conn.execute("""CREATE TABLE IF NOT EXISTS logs(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER, query TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-conn.commit()
 
-PHONE_RE = re.compile(r"^\+?[\d\s\-()]{7,20}$")
+# Таблица истории Telegram
+conn.execute("""CREATE TABLE IF NOT EXISTS tg_history(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER,
+    username TEXT,
+    old_name TEXT,
+    new_name TEXT,
+    old_username TEXT,
+    new_username TEXT,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+conn.commit()
 
 def detect_type(q: str) -> str:
     q = q.strip()
     if q.startswith("@"): return "tg_username"
     if "vk.com/" in q: return "vk_link"
     if "ok.ru/" in q: return "ok_link"
-    if PHONE_RE.match(q): return "phone"
-    # Проверка на ФИО + дата
+    if re.match(r"^\+?[\d\s\-()]{7,20}$", q): return "phone"
     parts = q.split()
     if len(parts) >= 3 and any(char.isdigit() for char in parts[-1]):
         return "fssp"
     return "text"
-
-def analyze_phone(raw: str) -> dict:
-    try:
-        import phonenumbers
-        from phonenumbers import geocoder, carrier
-        num = phonenumbers.parse(raw, None)
-        if not phonenumbers.is_valid_number(num):
-            return {"valid": False}
-        return {
-            "valid": True,
-            "e164": phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164),
-            "national": phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.NATIONAL),
-            "region": geocoder.description_for_number(num, "ru") or "—",
-            "carrier": carrier.name_for_number(num, "ru") or "—",
-        }
-    except Exception as e:
-        return {"valid": False, "error": str(e)}
 
 @dp.message(Command("start"))
 async def start(m: Message):
@@ -55,8 +49,7 @@ async def start(m: Message):
         "Отправь:\n"
         "• номер (+7..., +375..., +380...)\n"
         "• @username (Telegram)\n"
-        "• ФИО и дату рождения (Иванов Иван Иванович 01.01.1990)\n"
-        "• любой текст"
+        "• ФИО и дату рождения\n"
     )
 
 @dp.message(F.text)
@@ -81,13 +74,53 @@ async def handle(m: Message):
             report.append("Номер невалиден для РФ/BY/UA.")
 
     if t == "tg_username":
+        clean_user = q.lstrip("@")
         try:
-            chat = await bot.get_chat(q)
-            report.append(f"Telegram: id={chat.id}, name={chat.title or chat.full_name}, username={chat.username}")
+            chat = await bot.get_chat(f"@{clean_user}")
+            current_name = chat.title or chat.full_name or "Без имени"
+            current_username = chat.username or "Без юзернейма"
+            tg_id = chat.id
+
+            # Ищем последнюю запись по ID
+            cursor = conn.cursor()
+            cursor.execute("SELECT old_name, new_name, old_username, new_username, changed_at FROM tg_history WHERE tg_id = ? ORDER BY changed_at DESC", (tg_id,))
+            history = cursor.fetchall()
+
+            report.append(f"Telegram ID: {tg_id}")
+            report.append(f"Текущее имя: {current_name}")
+            report.append(f"Текущий юзернейм: @{current_username}")
+
+            if history:
+                report.append("\n[История изменений]:")
+                for old_n, new_n, old_u, new_u, changed_at in history:
+                    if old_n != new_n:
+                        report.append(f"• Имя: '{old_n}' -> '{new_n}' ({changed_at})")
+                    if old_u != new_u:
+                        report.append(f"• Юзернейм: '@{old_u}' -> '@{new_u}' ({changed_at})")
+            else:
+                report.append("\n[История пуста. Бот видит этого пользователя впервые.]")
+
+            # Записываем изменения (если имя или юзернейм изменились)
+            if history:
+                last_old_n, last_new_n, last_old_u, last_new_u, _ = history[0]
+                if last_new_n != current_name or last_new_u != current_username:
+                    conn.execute("""INSERT INTO tg_history
+                        (tg_id, username, old_name, new_name, old_username, new_username)
+                        VALUES (?,?,?,?,?,?)""",
+                        (tg_id, clean_user, last_new_n, current_name, last_new_u, current_username))
+                    conn.commit()
+            else:
+                # Первая запись
+                conn.execute("""INSERT INTO tg_history
+                    (tg_id, username, old_name, new_name, old_username, new_username)
+                    VALUES (?,?,?,?,?,?)""",
+                    (tg_id, clean_user, current_name, current_name, current_username, current_username))
+                conn.commit()
+
         except Exception as e:
             err_text = str(e)
             if "chat not found" in err_text:
-                report.append("Telegram: Пользователь не найден. Проверьте правильность написания юзернейма.")
+                report.append("Telegram: Пользователь не найден.")
             else:
                 report.append(f"Telegram: ошибка {err_text}")
 
@@ -104,11 +137,11 @@ async def handle(m: Message):
         elif "results" in fssp_res:
             report.append(f"Найдено записей: {fssp_res['total']}")
             for item in fssp_res["results"][:3]:
-                report.append(f"• {item['Сумма долга']} руб. (ИП: {item['Номер ИП']})")
+                report.append(f"• {item.get('Сумма')} руб. (ИП: {item.get('Номер ИП')})")
         else:
             report.append(f"{fssp_res.get('info', 'Нет данных')}")
 
-    report.append("\nЛимит открытых данных. Для расширения — подключай API.")
+    report.append("\nЛимит открытых данных.")
     await m.answer("\n".join(report)[:4000])
 
 async def health(request):
@@ -123,9 +156,7 @@ async def start_web():
     await site.start()
 
 async def main():
-    # Запускаем веб-сервер в фоне, чтобы Render видел порт
     asyncio.create_task(start_web())
-    # Запускаем бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
