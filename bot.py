@@ -1,14 +1,15 @@
 import asyncio, sqlite3, os, re
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
 from aiohttp import web
+from aiogram.enums import ParseMode
 
 from config import BOT_TOKEN, DB_PATH
 from modules.phone import analyze_phone
 from modules.fssp import check_fssp
 
-bot = Bot(BOT_TOKEN)
+bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
 os.makedirs("data", exist_ok=True)
@@ -42,13 +43,42 @@ def detect_type(q: str) -> str:
 
 @dp.message(Command("start"))
 async def start(m: Message):
-    await m.answer(
-        "SWILL OSINT BOT\n\n"
-        "Отправь:\n"
-        "• номер (+7..., +375..., +380...)\n"
-        "• @username (Telegram)\n"
-        "• ФИО и дату рождения\n"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Проверить номер", callback_data="menu_phone")],
+        [InlineKeyboardButton(text="🕵️ Пробив @username", callback_data="menu_tg")],
+        [InlineKeyboardButton(text="⚖️ Долги ФССП", callback_data="menu_fssp")],
+        [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="menu_help")]
+    ])
+
+    text = (
+        "🛡 <b>SWILL OSINT BOT</b>\n\n"
+        "Привет! Я помогу найти открытую информацию.\n\n"
+        "Выбери действие на кнопках ниже или просто отправь мне запрос:\n"
+        "• <code>+7 900 000 00 00</code>\n"
+        "• <code>@username</code>\n"
+        "• <code>Иванов Иван 01.01.1990</code>"
     )
+    
+    await m.answer(text, reply_markup=keyboard)
+
+@dp.callback_query()
+async def handle_buttons(callback: CallbackQuery):
+    await callback.answer()
+    
+    if callback.data == "menu_help":
+        await callback.message.answer(
+            "📖 <b>Как пользоваться:</b>\n\n"
+            "1. Отправь номер (например, <code>+79000000000</code>) — узнаешь оператора и регион.\n"
+            "2. Отправь <code>@username</code> — узнаешь ID и историю имен.\n"
+            "3. Отправь ФИО и дату — проверишь долги ФССП.\n\n"
+            "База данных бота обновляется автоматически."
+        )
+    elif callback.data == "menu_phone":
+        await callback.message.answer("Введи номер телефона в формате <code>+7...</code>")
+    elif callback.data == "menu_tg":
+        await callback.message.answer("Введи юзернейм в формате <code>@username</code>")
+    elif callback.data == "menu_fssp":
+        await callback.message.answer("Введи ФИО и дату рождения (например, <code>Иванов Иван Иванович 01.01.1990</code>)")
 
 @dp.message(F.text)
 async def handle(m: Message):
@@ -57,20 +87,8 @@ async def handle(m: Message):
     conn.commit()
 
     t = detect_type(q)
-    report = [f"SWILL // запрос: {q}", f"тип: {t}", ""]
-
-    if t == "phone":
-        p = analyze_phone(q)
-        if p.get("valid"):
-            report += [
-                f"E.164: {p['e164']}",
-                f"Национальный: {p['national']}",
-                f"Регион: {p['region']}",
-                f"Оператор: {p['carrier']}",
-            ]
-        else:
-            report.append("Номер невалиден для РФ/BY/UA.")
-
+    
+    # Для ФССП и Телеграма делаем отдельные карточки, для остального — общий отчет
     if t == "tg_username":
         clean_user = q.lstrip("@")
         try:
@@ -83,19 +101,22 @@ async def handle(m: Message):
             cursor.execute("SELECT old_name, new_name, old_username, new_username, changed_at FROM tg_history WHERE tg_id = ? ORDER BY changed_at DESC", (tg_id,))
             history = cursor.fetchall()
 
-            report.append(f"Telegram ID: {tg_id}")
-            report.append(f"Текущее имя: {current_name}")
-            report.append(f"Текущий юзернейм: @{current_username}")
-
+            text = (
+                f"🕵️ <b>Профиль Telegram</b>\n"
+                f"├ 🆔 ID: <code>{tg_id}</code>\n"
+                f"├ 👤 Имя: <b>{current_name}</b>\n"
+                f"├ 🔗 Ссылка: <a href='https://t.me/{current_username}'>@{current_username}</a>\n"
+            )
+            
             if history:
-                report.append("\n[История изменений]:")
+                text += f"\n📜 <b>История изменений:</b>\n"
                 for old_n, new_n, old_u, new_u, changed_at in history:
                     if old_n != new_n:
-                        report.append(f"• Имя: '{old_n}' -> '{new_n}' ({changed_at})")
+                        text += f"• Имя: {old_n} ➡️ <b>{new_n}</b>\n"
                     if old_u != new_u:
-                        report.append(f"• Юзернейм: '@{old_u}' -> '@{new_u}' ({changed_at})")
+                        text += f"• Юзер: @{old_u} ➡️ <b>@{new_u}</b>\n"
             else:
-                report.append("\n[История пуста. Бот видит этого пользователя впервые.]")
+                text += "\n📜 <i>История пуста. Я вижу его впервые.</i>"
 
             if history:
                 last_old_n, last_new_n, last_old_u, last_new_u, _ = history[0]
@@ -112,32 +133,55 @@ async def handle(m: Message):
                     (tg_id, clean_user, current_name, current_name, current_username, current_username))
                 conn.commit()
 
+            await m.answer(text)
+
         except Exception as e:
             err_text = str(e)
             if "chat not found" in err_text:
-                report.append("Telegram: Пользователь не найден.")
+                await m.answer("❌ <b>Ошибка:</b> Пользователь с таким юзернеймом не найден.")
             else:
-                report.append(f"Telegram: ошибка {err_text}")
+                await m.answer(f"❌ <b>Ошибка Telegram:</b> {err_text}")
+        return
 
     if t == "fssp":
         parts = q.split()
         bdate = parts[-1]
         fio = " ".join(parts[:-1])
         
-        report.append(f"[Проверка ФССП для: {fio}, {bdate}]")
+        await m.answer(f"⏳ Проверяю базу ФССП для <b>{fio}</b> ({bdate})...")
         fssp_res = check_fssp(fio, bdate)
         
         if "error" in fssp_res:
-            report.append(f"Ошибка: {fssp_res['error']}")
+            await m.answer(f"❌ <b>Ошибка:</b> {fssp_res['error']}")
         elif "results" in fssp_res:
-            report.append(f"Найдено записей: {fssp_res['total']}")
+            text = f"⚖️ <b>Найдено записей: {fssp_res['total']}</b>\n\n"
             for item in fssp_res["results"][:3]:
-                report.append(f"• {item.get('Сумма')} руб. (ИП: {item.get('Номер ИП')})")
+                text += f"• 💰 Сумма: <b>{item.get('Сумма')} руб.</b>\n  📄 ИП: {item.get('Номер ИП')}\n\n"
+            await m.answer(text)
         else:
-            report.append(f"{fssp_res.get('info', 'Нет данных')}")
+            await m.answer(f"✅ <b>ФССП:</b> {fssp_res.get('info', 'Долгов не найдено.')}")
+        return
 
-    report.append("\nЛимит открытых данных.")
-    await m.answer("\n".join(report)[:4000])
+    # Остальные типы (номер, текст)
+    report = [f"🔍 <b>Запрос:</b> {q}\n"]
+
+    if t == "phone":
+        p = analyze_phone(q)
+        if p.get("valid"):
+            report += [
+                f"📱 <b>Анализ номера</b>",
+                f"├ 📞 Формат: <code>{p['e164']}</code>",
+                f"├ 🇷🇺 Регион: <b>{p['region']}</b>",
+                f"└ 📶 Оператор: <b>{p['carrier']}</b>",
+            ]
+        else:
+            report.append("❌ Номер невалиден для РФ/BY/UA.")
+
+    else:
+        report.append("🤷‍♂️ Неизвестный тип запроса. Используй кнопки меню.")
+
+    report.append("\n<i>Лимит открытых данных. Для расширения — подключай API.</i>")
+    await m.answer("\n".join(report))
 
 async def health(request):
     return web.Response(text="ok")
@@ -156,3 +200,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
