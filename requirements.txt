@@ -1,5 +1,0 @@
-aiogram==3.13.0
-phonenumbers==8.13.40
-aiohttp==3.9.5
-beautifulsoup4==4.12.3
-lxml==5.2.2
