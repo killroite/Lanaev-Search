@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from aiohttp import web
 
 from config import BOT_TOKEN, DB_PATH
+from modules.fssp import check_fssp  # Импорт ФССП
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -24,6 +25,10 @@ def detect_type(q: str) -> str:
     if "vk.com/" in q: return "vk_link"
     if "ok.ru/" in q: return "ok_link"
     if PHONE_RE.match(q): return "phone"
+    # Проверка на ФИО + дата
+    parts = q.split()
+    if len(parts) >= 3 and any(char.isdigit() for char in parts[-1]):
+        return "fssp"
     return "text"
 
 def analyze_phone(raw: str) -> dict:
@@ -50,7 +55,7 @@ async def start(m: Message):
         "Отправь:\n"
         "• номер (+7..., +375..., +380...)\n"
         "• @username (Telegram)\n"
-        "• ссылку vk.com/... или ok.ru/...\n"
+        "• ФИО и дату рождения (Иванов Иван Иванович 01.01.1990)\n"
         "• любой текст"
     )
 
@@ -80,7 +85,28 @@ async def handle(m: Message):
             chat = await bot.get_chat(q)
             report.append(f"Telegram: id={chat.id}, name={chat.title or chat.full_name}, username={chat.username}")
         except Exception as e:
-            report.append(f"Telegram: ошибка {e}")
+            err_text = str(e)
+            if "chat not found" in err_text:
+                report.append("Telegram: Пользователь не найден. Проверьте правильность написания юзернейма.")
+            else:
+                report.append(f"Telegram: ошибка {err_text}")
+
+    if t == "fssp":
+        parts = q.split()
+        bdate = parts[-1]
+        fio = " ".join(parts[:-1])
+        
+        report.append(f"[Проверка ФССП для: {fio}, {bdate}]")
+        fssp_res = check_fssp(fio, bdate)
+        
+        if "error" in fssp_res:
+            report.append(f"Ошибка: {fssp_res['error']}")
+        elif "results" in fssp_res:
+            report.append(f"Найдено записей: {fssp_res['total']}")
+            for item in fssp_res["results"][:3]:
+                report.append(f"• {item['Сумма долга']} руб. (ИП: {item['Номер ИП']})")
+        else:
+            report.append(f"{fssp_res.get('info', 'Нет данных')}")
 
     report.append("\nЛимит открытых данных. Для расширения — подключай API.")
     await m.answer("\n".join(report)[:4000])
@@ -97,11 +123,10 @@ async def start_web():
     await site.start()
 
 async def main():
-    await start_web()
+    # Запускаем веб-сервер в фоне, чтобы Render видел порт
+    asyncio.create_task(start_web())
+    # Запускаем бота
     await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
