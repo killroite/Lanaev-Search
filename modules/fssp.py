@@ -1,53 +1,69 @@
+import os
 import requests
-from bs4 import BeautifulSoup
 
 def check_fssp(fio: str, bdate: str, region: str = "") -> dict:
-    url = "https://fssp.gov.ru/iss/ip"
+    """
+    Поиск через официальный API DaData (ФССП).
+    """
+    token = os.getenv("DADATA_TOKEN")
+    secret = os.getenv("DADATA_SECRET")
     
-    payload = {
-        "is[ext_sys]": "0",
-        "is[rt]": "0",
-        "is[ip_type]": "1",
-        "is[last_name]": fio.split()[0] if len(fio.split()) > 0 else "",
-        "is[first_name]": fio.split()[1] if len(fio.split()) > 1 else "",
-        "is[patronymic]": fio.split()[2] if len(fio.split()) > 2 else "",
-        "is[bdate]": bdate,
-        "is[region]": region,
-        "token": "gmpb"
+    if not token or not secret:
+        return {"error": "Ключи DaData не настроены в Environment."}
+
+    url = "https://cleaner.dadata.ru/api/v1/clean/name"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f"Token {token}",
+        "X-Secret": secret
     }
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    # DaData ждет запрос в формате JSON
+    payload = [{
+        "query": fio,
+        "count": 1
+    }]
 
     try:
-        response = requests.post(url, data=payload, headers=headers, timeout=15)
+        # Сначала чистим ФИО (чтобы DaData разбил его на Фамилию, Имя, Отчество)
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
+        data = response.json()
+
+        if not data or not data[0].get("result"):
+            return {"info": "Не удалось распознать ФИО."}
+
+        name_data = data[0]["result"]
         
-        soup = BeautifulSoup(response.text, "html.parser")
-        table = soup.find("table", class_="table")
+        # Формируем запрос к ФССП
+        fssp_url = "https://api.dadata.ru/v2/fssp/find"
+        fssp_payload = {
+            "query": {
+                "fio": name_data.get("name"), # Полное ФИО
+                "birthdate": bdate,
+                "region": region
+            }
+        }
         
-        if not table:
+        fssp_response = requests.post(fssp_url, json=fssp_payload, headers=headers, timeout=15)
+        fssp_response.raise_for_status()
+        fssp_data = fssp_response.json()
+
+        if not fssp_data.get("items"):
             return {"info": "Исполнительных производств не найдено."}
-        
+
         results = []
-        rows = table.find_all("tr")[1:]
-        
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) >= 6:
-                results.append({
-                    "ФИО": cols[0].get_text(strip=True),
-                    "Дата рождения": cols[1].get_text(strip=True),
-                    "Номер ИП": cols[2].get_text(strip=True),
-                    "Сумма долга": cols[4].get_text(strip=True),
-                    "Отделение": cols[5].get_text(strip=True)
-                })
-        
-        if not results:
-            return {"info": "Исполнительных производств не найдено."}
-        
+        for item in fssp_data["items"]:
+            results.append({
+                "ФИО": item.get("name"),
+                "Дата рождения": item.get("birthdate"),
+                "Номер ИП": item.get("number"),
+                "Сумма долга": item.get("sum"),
+                "Отделение": item.get("department")
+            })
+
         return {"total": len(results), "results": results}
 
     except Exception as e:
-        return {"error": f"Ошибка ФССП: {str(e)}"}
+        return {"error": f"Ошибка DaData: {str(e)}"}
