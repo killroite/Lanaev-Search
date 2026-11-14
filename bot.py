@@ -1,4 +1,4 @@
-import asyncio, sqlite3, osimport asyncio, sqlite3, os, re
+import asyncio, sqlite3, os, re
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -14,12 +14,10 @@ dp = Dispatcher()
 os.makedirs("data", exist_ok=True)
 conn = sqlite3.connect(DB_PATH)
 
-# Таблица логов запросов
 conn.execute("""CREATE TABLE IF NOT EXISTS logs(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER, query TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 
-# Таблица истории Telegram
 conn.execute("""CREATE TABLE IF NOT EXISTS tg_history(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tg_id INTEGER,
@@ -81,7 +79,6 @@ async def handle(m: Message):
             current_username = chat.username or "Без юзернейма"
             tg_id = chat.id
 
-            # Ищем последнюю запись по ID
             cursor = conn.cursor()
             cursor.execute("SELECT old_name, new_name, old_username, new_username, changed_at FROM tg_history WHERE tg_id = ? ORDER BY changed_at DESC", (tg_id,))
             history = cursor.fetchall()
@@ -100,7 +97,6 @@ async def handle(m: Message):
             else:
                 report.append("\n[История пуста. Бот видит этого пользователя впервые.]")
 
-            # Записываем изменения (если имя или юзернейм изменились)
             if history:
                 last_old_n, last_new_n, last_old_u, last_new_u, _ = history[0]
                 if last_new_n != current_name or last_new_u != current_username:
@@ -110,7 +106,6 @@ async def handle(m: Message):
                         (tg_id, clean_user, last_new_n, current_name, last_new_u, current_username))
                     conn.commit()
             else:
-                # Первая запись
                 conn.execute("""INSERT INTO tg_history
                     (tg_id, username, old_name, new_name, old_username, new_username)
                     VALUES (?,?,?,?,?,?)""",
