@@ -30,10 +30,9 @@ conn = sqlite3.connect(DB_PATH)
 conn.execute("""CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, query TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 conn.commit()
 
-ALLOWED_IDS = [6847416129]
-
+# --- БЕЛЫЙ СПИСОК ОТКЛЮЧЕН (ДОСТУП ДЛЯ ВСЕХ) ---
 def is_allowed(user_id: int) -> bool:
-    return user_id in ALLOWED_IDS
+    return True
 
 def detect_type(q: str) -> str:
     q = q.strip()
@@ -45,10 +44,6 @@ def detect_type(q: str) -> str:
 
 @dp.message(Command("start"))
 async def start(m: Message):
-    if not is_allowed(m.from_user.id):
-        await m.answer("⛔ <b>Доступ запрещен.</b>")
-        return
-        
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
         [InlineKeyboardButton(text="🚨 Центр Жалоб", callback_data="menu_report")],
@@ -106,16 +101,13 @@ async def cb_handler(cb: CallbackQuery):
         "menu_phone": "Введи номер (+7...)",
         "menu_ip": "Введи IP-адрес",
         "menu_email": "Введи email",
-        "menu_fssp": "Введи ФИО и дату",
+        "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)",
         "menu_tg": "Введи @username"
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
 @dp.message(F.text)
 async def handle(m: Message):
-    if not is_allowed(m.from_user.id):
-        return
-        
     q = m.text.strip()
     t = detect_type(q)
 
@@ -125,7 +117,6 @@ async def handle(m: Message):
             await m.answer("❌ Невалидный номер.")
             return
         
-        # 1. Базовый анализ
         text = (
             f"📱 <b>Анализ номера</b>\n"
             f"├ <b>Номер:</b> <code>{p['e164']}</code>\n"
@@ -135,7 +126,6 @@ async def handle(m: Message):
         )
         await m.answer(text)
         
-        # 2. Мессенджеры
         mess = await check_messengers(p['e164'])
         mess_text = (
             "<b>📊 Наличие аккаунтов:</b>\n"
@@ -146,7 +136,6 @@ async def handle(m: Message):
         )
         await m.answer(mess_text)
 
-        # 3. Ссылки на объявления (Avito, Youla)
         avito = await get_avito_link(p['e164'])
         youla = await get_youla_link(p['e164'])
         
@@ -178,7 +167,6 @@ async def handle(m: Message):
         return
 
     if t == "tg_username":
-        # Логика сбора досье и Sherlock (остается без изменений)
         clean_user = q.lstrip("@")
         await m.answer(f"⏳ <i>Собираю досье на @{clean_user}...</i>")
         
