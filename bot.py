@@ -3,8 +3,8 @@ import sqlite3
 import os
 import re
 import uuid
-import time
 
+import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.filters import Command
@@ -20,7 +20,11 @@ from modules.email import check_email
 from modules.messengers import check_messengers
 from modules.sherlock import run_sherlock
 from modules.pdf_gen import generate_pdf_report
-from modules.extra_osint import get_avito_link, get_youla_link
+from modules.extra_osint import (
+    get_avito_link, get_youla_link, 
+    get_vk_search_link, get_ok_search_link,
+    get_google_search_link, get_yandex_search_link
+)
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -30,9 +34,8 @@ conn = sqlite3.connect(DB_PATH)
 conn.execute("""CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, query TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 conn.commit()
 
-# --- БЕЛЫЙ СПИСОК ОТКЛЮЧЕН (ДОСТУП ДЛЯ ВСЕХ) ---
 def is_allowed(user_id: int) -> bool:
-    return True
+    return True # Доступ открыт для всех
 
 def detect_type(q: str) -> str:
     q = q.strip()
@@ -106,10 +109,56 @@ async def cb_handler(cb: CallbackQuery):
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
+# --- ФУНКЦИЯ ПОИСКА ПО БАЗЕ ---
+async def search_in_base(query: str) -> str:
+    file_url = os.getenv("BASE_TXT_URL")
+    if not file_url:
+        return "❌ Ссылка на базу не настроена."
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(file_url) as resp:
+                if resp.status != 200:
+                    return "❌ Не удалось скачать базу."
+                text = await resp.text()
+        
+        # Ищем в тексте (без учета регистра)
+        search_q = query.lower().strip()
+        records = text.split("ФИО:")
+        
+        found = []
+        for rec in records:
+            if search_q in rec.lower():
+                found.append("ФИО:" + rec.strip())
+        
+        if not found:
+            return "🔍 Ничего не найдено в базе."
+        
+        result_text = f"<b>📁 Найдено {len(found)} совпадений:</b>\n\n"
+        for item in found[:3]: # Показываем первые 3
+            result_text += f"├ {item[:400]}...\n\n" # Обрезаем длинные строки
+        return result_text
+        
+    except Exception as e:
+        return f"❌ Ошибка поиска: {str(e)}"
+
 @dp.message(F.text)
 async def handle(m: Message):
     q = m.text.strip()
     t = detect_type(q)
+
+    # --- ПОИСК ПО БАЗЕ (если запрос не похож на телефон/юзернейм) ---
+    if t == "text":
+        # Исключаем запросы ФССП (где есть дата)
+        parts = q.split()
+        if len(parts) >= 3 and any(char.isdigit() for char in parts[-1]):
+            # Это похоже на ФССП, обрабатываем ниже
+            pass
+        else:
+            await m.answer("⏳ <i>Ищу в базе (это займет пару секунд)...</i>")
+            res = await search_in_base(q)
+            await m.answer(res)
+            return
 
     if t == "phone":
         p = analyze_phone(q)
@@ -138,11 +187,19 @@ async def handle(m: Message):
 
         avito = await get_avito_link(p['e164'])
         youla = await get_youla_link(p['e164'])
+        vk = await get_vk_search_link(p['e164'])
+        ok = await get_ok_search_link(p['e164'])
+        google = await get_google_search_link(p['e164'])
+        yandex = await get_yandex_search_link(p['e164'])
         
         links_text = (
-            "<b>🔗 Поиск объявлений:</b>\n"
+            "<b>🔗 Готовые ссылки для поиска:</b>\n"
             f"├ <a href='{avito}'>Avito</a>\n"
-            f"└ <a href='{youla}'>Youla</a>"
+            f"├ <a href='{youla}'>Youla</a>\n"
+            f"├ <a href='{vk}'>ВКонтакте</a>\n"
+            f"├ <a href='{ok}'>Одноклассники</a>\n"
+            f"├ <a href='{yandex}'>Яндекс</a>\n"
+            f"└ <a href='{google}'>Google</a>"
         )
         await m.answer(links_text)
         return
@@ -235,3 +292,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
