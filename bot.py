@@ -9,8 +9,9 @@ from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN, DB_PATH
 from modules.phone import analyze_phone
 from modules.fssp import check_fssp
+from modules.ip import check_ip
+from modules.email import check_email
 
-# Инициализация бота с правильным синтаксисом для aiogram 3.x
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -24,6 +25,8 @@ def detect_type(q: str) -> str:
     q = q.strip()
     if q.startswith("@"): return "tg_username"
     if re.match(r"^\+?[\d\s\-()]{7,20}$", q): return "phone"
+    if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", q): return "ip"
+    if "@" in q and "." in q: return "email"
     parts = q.split()
     if len(parts) >= 3 and any(char.isdigit() for char in parts[-1]): return "fssp"
     return "text"
@@ -31,8 +34,8 @@ def detect_type(q: str) -> str:
 @dp.message(Command("start"))
 async def start(m: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Проверить номер", callback_data="menu_phone")],
-        [InlineKeyboardButton(text="🕵️ Пробив @username", callback_data="menu_tg")],
+        [InlineKeyboardButton(text="📱 Номер", callback_data="menu_phone"), InlineKeyboardButton(text="🕵️ @username", callback_data="menu_tg")],
+        [InlineKeyboardButton(text="🌐 IP-адрес", callback_data="menu_ip"), InlineKeyboardButton(text="📧 Email", callback_data="menu_email")],
         [InlineKeyboardButton(text="⚖️ Долги ФССП", callback_data="menu_fssp")]
     ])
     await m.answer("🛡 <b>SWILL OSINT BOT</b>\n\nВыбери действие ниже:", reply_markup=kb)
@@ -40,7 +43,13 @@ async def start(m: Message):
 @dp.callback_query()
 async def cb_handler(cb: CallbackQuery):
     await cb.answer()
-    texts = {"menu_phone": "Введи номер (+7...)", "menu_tg": "Введи @username", "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)"}
+    texts = {
+        "menu_phone": "Введи номер (+7...)",
+        "menu_tg": "Введи @username",
+        "menu_ip": "Введи IP-адрес (например, 8.8.8.8)",
+        "menu_email": "Введи email (например, test@gmail.com)",
+        "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)"
+    }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
 @dp.message(F.text)
@@ -58,6 +67,28 @@ async def handle(m: Message):
             await m.answer("❌ Пользователь не найден.")
         return
 
+    if t == "ip":
+        await m.answer(f"⏳ Ищу данные по IP <b>{q}</b>...")
+        res = await check_ip(q)
+        if "error" in res:
+            await m.answer(f"❌ {res['error']}")
+        else:
+            text = f"🌐 <b>IP:</b> {res['IP']}\n🇺🇳 <b>Страна:</b> {res['Страна']}\n🏙 <b>Город:</b> {res['Город']}\n📡 <b>Провайдер:</b> {res['Провайдер']}\n🏢 <b>Орг:</b> {res['Организация']}"
+            await m.answer(text)
+        return
+
+    if t == "email":
+        await m.answer(f"⏳ Проверяю email <b>{q}</b>...")
+        res = await check_email(q)
+        if "error" in res:
+            await m.answer(f"❌ {res['error']}")
+        elif "info" in res:
+            await m.answer(f"ℹ️ {res['info']}")
+        else:
+            text = f"📧 <b>Email:</b> {res.get('Email')}\n⭐ <b>Репутация:</b> {res.get('Репутация')}\n⚠️ <b>Подозрительный:</b> {res.get('Подозрительный')}\n💧 <b>Утечки:</b> {res.get('Утечки')}"
+            await m.answer(text)
+        return
+
     if t == "fssp":
         parts = q.split()
         res = check_fssp(" ".join(parts[:-1]), parts[-1])
@@ -72,7 +103,7 @@ async def handle(m: Message):
             await m.answer("❌ Невалидный номер.")
         return
 
-    await m.answer("🤷‍♂️ Неизвестный запрос.")
+    await m.answer("🤷‍♂️ Неизвестный запрос. Проверь формат.")
 
 async def health(request):
     return web.Response(text="ok")
