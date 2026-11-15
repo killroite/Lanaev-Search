@@ -35,7 +35,7 @@ conn.execute("""CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY AUTOINCRE
 conn.commit()
 
 def is_allowed(user_id: int) -> bool:
-    return True # Доступ открыт для всех
+    return True
 
 def detect_type(q: str) -> str:
     q = q.strip()
@@ -45,6 +45,9 @@ def detect_type(q: str) -> str:
     if "@" in q and "." in q: return "email"
     return "text"
 
+# --- ВИЗУАЛЬНЫЕ РАЗДЕЛИТЕЛИ ---
+LINE = "━━━━━━━━━━━━━━━"
+
 @dp.message(Command("start"))
 async def start(m: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -52,15 +55,27 @@ async def start(m: Message):
         [InlineKeyboardButton(text="🚨 Центр Жалоб", callback_data="menu_report")],
         [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
     ])
-    await m.answer("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
+    text = (
+        f"🛡 <b>SWILL OSINT BOT</b>\n"
+        f"{LINE}\n"
+        f"👋 Привет, <b>{m.from_user.first_name}</b>!\n\n"
+        f"Я — профессиональный инструмент для поиска открытой информации.\n\n"
+        f"🔹 <b>Инструменты:</b> Поиск по номеру, IP, Email.\n"
+        f"🔹 <b>Жалобы:</b> Сбор доказательств для поддержки.\n"
+        f"🔹 <b>Разработчики:</b> Связь и обновления.\n"
+        f"{LINE}\n"
+        f"<i>Выбери действие ниже:</i>"
+    )
+    await m.answer(text, reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_report")
 async def menu_report(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "🚨 <b>Центр Жалоб</b>\n\n"
-        "Отправь мне @username нарушителя, и я соберу по нему досье "
-        "и сгенерирую PDF-отчет для поддержки Telegram."
+        f"🚨 <b>ЦЕНТР ЖАЛОБ</b>\n"
+        f"{LINE}\n"
+        f"Этот раздел помогает собрать доказательства на скамеров и мошенников.\n\n"
+        f"Отправь мне @username нарушителя, и я соберу по нему досье и сгенерирую PDF-отчет для поддержки Telegram."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]])
     await cb.message.edit_text(text, reply_markup=kb)
@@ -74,7 +89,17 @@ async def menu_tools(cb: CallbackQuery):
         [InlineKeyboardButton(text="🕵️ Поиск по юзернейму", callback_data="menu_tg")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
     ])
-    await cb.message.edit_text("🔍 <b>Инструменты поиска</b>:", reply_markup=kb)
+    text = (
+        f"🔍 <b>ИНСТРУМЕНТЫ ПОИСКА</b>\n"
+        f"{LINE}\n"
+        f"Выбери нужный инструмент:\n\n"
+        f"📱 <b>Номер</b> — оператор, регион, мессенджеры.\n"
+        f"🌐 <b>IP</b> — провайдер и геолокация.\n"
+        f"📧 <b>Email</b> — репутация и утечки.\n"
+        f"⚖️ <b>ФССП</b> — проверка долгов.\n"
+        f"🕵️ <b>Юзернейм</b> — досье и Sherlock."
+    )
+    await cb.message.edit_text(text, reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_back")
 async def menu_back(cb: CallbackQuery):
@@ -84,15 +109,22 @@ async def menu_back(cb: CallbackQuery):
         [InlineKeyboardButton(text="🚨 Центр Жалоб", callback_data="menu_report")],
         [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
     ])
-    await cb.message.edit_text("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
+    text = (
+        f"🛡 <b>SWILL OSINT BOT</b>\n"
+        f"{LINE}\n"
+        f"Выбери категорию:"
+    )
+    await cb.message.edit_text(text, reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_devs")
 async def menu_devs(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "👨‍💻 <b>Разработчики</b>\n\n"
-        "Бот создан командой <b>Swill Way</b>.\n"
-        "🔗 <b>Связь:</b> @ceokvist"
+        f"👨‍💻 <b>РАЗРАБОТЧИКИ</b>\n"
+        f"{LINE}\n"
+        f"Бот создан командой <b>Swill Way</b>.\n\n"
+        f"🔗 <b>Связь:</b> @ceokvist\n"
+        f"📂 <b>GitHub:</b> <a href='https://github.com/killroite/Lanaev-Search'>Lanaev-Search</a>"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]])
     await cb.message.edit_text(text, reply_markup=kb)
@@ -101,11 +133,11 @@ async def menu_devs(cb: CallbackQuery):
 async def cb_handler(cb: CallbackQuery):
     await cb.answer()
     texts = {
-        "menu_phone": "Введи номер (+7...)",
-        "menu_ip": "Введи IP-адрес",
-        "menu_email": "Введи email",
-        "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)",
-        "menu_tg": "Введи @username"
+        "menu_phone": "📱 Введи номер в формате <code>+7...</code>",
+        "menu_ip": "🌐 Введи IP-адрес (например, <code>8.8.8.8</code>)",
+        "menu_email": "📧 Введи email (например, <code>test@mail.ru</code>)",
+        "menu_fssp": "⚖️ Введи ФИО и дату (например, <code>Иванов Иван 01.01.1990</code>)",
+        "menu_tg": "🕵️ Введи <code>@username</code>"
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
@@ -122,7 +154,6 @@ async def search_in_base(query: str) -> str:
                     return "❌ Не удалось скачать базу."
                 text = await resp.text()
         
-        # Ищем в тексте (без учета регистра)
         search_q = query.lower().strip()
         records = text.split("ФИО:")
         
@@ -134,9 +165,9 @@ async def search_in_base(query: str) -> str:
         if not found:
             return "🔍 Ничего не найдено в базе."
         
-        result_text = f"<b>📁 Найдено {len(found)} совпадений:</b>\n\n"
-        for item in found[:3]: # Показываем первые 3
-            result_text += f"├ {item[:400]}...\n\n" # Обрезаем длинные строки
+        result_text = f"<b>📁 Найдено {len(found)} совпадений:</b>\n{LINE}\n\n"
+        for item in found[:3]:
+            result_text += f"├ {item[:400]}...\n\n"
         return result_text
         
     except Exception as e:
@@ -147,17 +178,12 @@ async def handle(m: Message):
     q = m.text.strip()
     t = detect_type(q)
 
-    # --- ПОИСК ПО БАЗЕ (если запрос не похож на телефон/юзернейм) ---
     if t == "text":
-        # Исключаем запросы ФССП (где есть дата)
         parts = q.split()
-        if len(parts) >= 3 and any(char.isdigit() for char in parts[-1]):
-            # Это похоже на ФССП, обрабатываем ниже
-            pass
-        else:
-            await m.answer("⏳ <i>Ищу в базе (это займет пару секунд)...</i>")
+        if not (len(parts) >= 3 and any(char.isdigit() for char in parts[-1])):
+            msg = await m.answer("⏳ <i>Ищу в базе...</i>")
             res = await search_in_base(q)
-            await m.answer(res)
+            await msg.edit_text(res)
             return
 
     if t == "phone":
@@ -166,66 +192,81 @@ async def handle(m: Message):
             await m.answer("❌ Невалидный номер.")
             return
         
-        text = (
-            f"📱 <b>Анализ номера</b>\n"
-            f"├ <b>Номер:</b> <code>{p['e164']}</code>\n"
-            f"├ <b>Регион:</b> {p['region']}\n"
-            f"└ <b>Оператор:</b> {p['carrier']}\n\n"
-            f"⏳ <i>Проверяю мессенджеры...</i>"
-        )
-        await m.answer(text)
+        msg = await m.answer(f"📱 <b>АНАЛИЗ НОМЕРА</b>\n{LINE}\n⏳ <i>Собираю данные...</i>")
         
         mess = await check_messengers(p['e164'])
-        mess_text = (
-            "<b>📊 Наличие аккаунтов:</b>\n"
-            f"├ Telegram: {mess.get('telegram', '❓')}\n"
-            f"├ WhatsApp: {mess.get('whatsapp', '❓')}\n"
-            f"├ Viber: {mess.get('viber', '❓')}\n"
-            f"└ VK: {mess.get('vk', '❓')}"
-        )
-        await m.answer(mess_text)
+        
+        # Визуальные индикаторы для мессенджеров
+        tg_icon = "🟢" if mess.get('telegram') == "Зарегистрирован" else "🔴"
+        wa_icon = "🟢" if mess.get('whatsapp') == "Зарегистрирован" else "🔴"
+        vb_icon = "🟢" if mess.get('viber') == "Зарегистрирован" else "🔴"
+        vk_icon = "🟢" if "Найден" in mess.get('vk', "") else "🟡"
 
         avito = await get_avito_link(p['e164'])
         youla = await get_youla_link(p['e164'])
         vk = await get_vk_search_link(p['e164'])
-        ok = await get_ok_search_link(p['e164'])
-        google = await get_google_search_link(p['e164'])
         yandex = await get_yandex_search_link(p['e164'])
         
-        links_text = (
-            "<b>🔗 Готовые ссылки для поиска:</b>\n"
+        text = (
+            f"📱 <b>АНАЛИЗ НОМЕРА</b>\n"
+            f"{LINE}\n"
+            f"📞 <b>Номер:</b> <code>{p['e164']}</code>\n"
+            f"🌍 <b>Регион:</b> {p['region']}\n"
+            f"📡 <b>Оператор:</b> {p['carrier']}\n"
+            f"{LINE}\n"
+            f"💬 <b>Мессенджеры:</b>\n"
+            f"{tg_icon} Telegram: {mess.get('telegram')}\n"
+            f"{wa_icon} WhatsApp: {mess.get('whatsapp')}\n"
+            f"{vb_icon} Viber: {mess.get('viber')}\n"
+            f"{vk_icon} VK: {mess.get('vk')}\n"
+            f"{LINE}\n"
+            f"🔗 <b>Поиск:</b>\n"
             f"├ <a href='{avito}'>Avito</a>\n"
             f"├ <a href='{youla}'>Youla</a>\n"
             f"├ <a href='{vk}'>ВКонтакте</a>\n"
-            f"├ <a href='{ok}'>Одноклассники</a>\n"
-            f"├ <a href='{yandex}'>Яндекс</a>\n"
-            f"└ <a href='{google}'>Google</a>"
+            f"└ <a href='{yandex}'>Яндекс</a>"
         )
-        await m.answer(links_text)
+        await msg.edit_text(text)
         return
 
     if t == "ip":
-        await m.answer(f"⏳ <i>Ищу данные по IP <b>{q}</b>...</i>")
+        msg = await m.answer("⏳ <i>Ищу данные по IP...</i>")
         res = await check_ip(q)
-        if "error" in res: await m.answer(f"❌ {res['error']}")
+        if "error" in res: 
+            await msg.edit_text(f"❌ {res['error']}")
         else:
-            text = f"🌐 <b>IP-информация</b>\n├ <b>IP:</b> <code>{res['IP']}</code>\n├ <b>Страна:</b> {res['Страна']}\n├ <b>Город:</b> {res['Город']}\n└ <b>Провайдер:</b> {res['Провайдер']}"
-            await m.answer(text)
+            text = (
+                f"🌐 <b>IP-ИНФОРМАЦИЯ</b>\n"
+                f"{LINE}\n"
+                f"├ <b>IP:</b> <code>{res['IP']}</code>\n"
+                f"├ <b>Страна:</b> {res['Страна']}\n"
+                f"├ <b>Город:</b> {res['Город']}\n"
+                f"└ <b>Провайдер:</b> {res['Провайдер']}"
+            )
+            await msg.edit_text(text)
         return
 
     if t == "email":
-        await m.answer(f"⏳ <i>Проверяю email <b>{q}</b>...</i>")
+        msg = await m.answer("⏳ <i>Проверяю email...</i>")
         res = await check_email(q)
-        if "error" in res: await m.answer(f"❌ {res['error']}")
-        elif "info" in res: await m.answer(f"ℹ️ {res['info']}")
+        if "error" in res: 
+            await msg.edit_text(f"❌ {res['error']}")
+        elif "info" in res: 
+            await msg.edit_text(f"ℹ️ {res['info']}")
         else:
-            text = f"📧 <b>Email-информация</b>\n├ <b>Email:</b> <code>{res.get('Email')}</code>\n├ <b>Репутация:</b> {res.get('Репутация')}\n└ <b>Утечки:</b> {res.get('Утечки')}"
-            await m.answer(text)
+            text = (
+                f"📧 <b>EMAIL-ИНФОРМАЦИЯ</b>\n"
+                f"{LINE}\n"
+                f"├ <b>Email:</b> <code>{res.get('Email')}</code>\n"
+                f"├ <b>Репутация:</b> {res.get('Репутация')}\n"
+                f"└ <b>Утечки:</b> {res.get('Утечки')}"
+            )
+            await msg.edit_text(text)
         return
 
     if t == "tg_username":
         clean_user = q.lstrip("@")
-        await m.answer(f"⏳ <i>Собираю досье на @{clean_user}...</i>")
+        msg = await m.answer(f"🕵️ <i>Собираю досье на @{clean_user}...</i>")
         
         tg_data = {}
         try:
@@ -240,7 +281,7 @@ async def handle(m: Message):
         except Exception:
             tg_data = {"Ошибка": "Профиль не найден или удален"}
 
-        await m.answer("🔎 <i>Проверяю наличие аккаунта на других платформах (Sherlock)...</i>")
+        await msg.edit_text(f"🕵️ <i>Проверяю Sherlock...</i>")
         sherlock_res = await run_sherlock(clean_user)
         
         sherlock_text = "Не найден на других сайтах."
@@ -259,8 +300,13 @@ async def handle(m: Message):
         }
         
         filepath = generate_pdf_report(clean_user, report_data)
-        caption = f"📄 <b>Досье на @{clean_user} готово!</b>\nДля жалобы перейди: https://telegram.org/support"
+        caption = (
+            f"📄 <b>ДОСЬЕ НА @{clean_user}</b>\n"
+            f"{LINE}\n"
+            f"Файл готов! Для жалобы перейди: https://telegram.org/support"
+        )
         await m.answer_document(FSInputFile(filepath), caption=caption)
+        await msg.delete()
         
         if os.path.exists(filepath):
             os.remove(filepath)
@@ -268,9 +314,9 @@ async def handle(m: Message):
 
     if t == "fssp":
         parts = q.split()
-        await m.answer(f"⏳ <i>Ищу долги для <b>{' '.join(parts[:-1])}</b>...</i>")
+        msg = await m.answer(f"⚖️ <i>Ищу долги...</i>")
         res = check_fssp(" ".join(parts[:-1]), parts[-1])
-        await m.answer(f"⚖️ <b>ФССП:</b> {res.get('error') or res.get('info') or 'Данные найдены.'}")
+        await msg.edit_text(f"⚖️ <b>ФССП:</b> {res.get('error') or res.get('info') or 'Данные найдены.'}")
         return
 
     await m.answer("🤷‍♂️ Неизвестный запрос. Воспользуйтесь меню /start")
@@ -292,4 +338,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
