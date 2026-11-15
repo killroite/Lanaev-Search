@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 import os
 import re
+import uuid
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -25,51 +26,76 @@ conn = sqlite3.connect(DB_PATH)
 conn.execute("""CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, query TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 conn.commit()
 
+ALLOWED_IDS = [6847416129] 
+
+def is_allowed(user_id: int) -> bool:
+    return user_id in ALLOWED_IDS
+
 def detect_type(q: str) -> str:
     q = q.strip()
     if q.startswith("@"): return "tg_username"
     if re.match(r"^\+?[\d\s\-()]{7,20}$", q): return "phone"
     if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", q): return "ip"
     if "@" in q and "." in q: return "email"
+    # Госномер РФ (А123ВС77)
+    if re.match(r"^[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\d{2,3}$", q, re.IGNORECASE): return "auto"
+    # VIN (17 символов)
+    if len(q) == 17 and q.isalnum(): return "vin"
     return "text"
 
 @dp.message(Command("start"))
 async def start(m: Message):
+    if not is_allowed(m.from_user.id):
+        await m.answer("⛔ <b>Доступ запрещен.</b>")
+        return
+        
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
         [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
     ])
-    text = (
-        "🛡 <b>SWILL OSINT BOT</b>\n\n"
-        "Ваш надежный инструмент для поиска открытой информации.\n"
-        "Выберите категорию ниже:"
-    )
-    await m.answer(text, reply_markup=kb)
+    await m.answer("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_tools")
 async def menu_tools(cb: CallbackQuery):
     await cb.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Номер (Мессенджеры)", callback_data="menu_phone")],
-        [InlineKeyboardButton(text="🌐 IP-адрес", callback_data="menu_ip"), InlineKeyboardButton(text="📧 Email", callback_data="menu_email")],
-        [InlineKeyboardButton(text="⚖️ Долги ФССП", callback_data="menu_fssp")],
+        [InlineKeyboardButton(text="📱 Номер", callback_data="menu_phone"), InlineKeyboardButton(text="🌐 IP", callback_data="menu_ip")],
+        [InlineKeyboardButton(text="📧 Email", callback_data="menu_email"), InlineKeyboardButton(text="⚖️ ФССП", callback_data="menu_fssp")],
+        [InlineKeyboardButton(text="🚗 Госномер / VIN", callback_data="menu_auto")],
+        [InlineKeyboardButton(text="🔑 Генератор UUID", callback_data="menu_uuid")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
     ])
-    await cb.message.edit_text("🔍 <b>Инструменты поиска</b>\n\nВыберите нужный инструмент:", reply_markup=kb)
+    await cb.message.edit_text("🔍 <b>Инструменты поиска</b>:", reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_devs")
 async def menu_devs(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "👨‍💻 <b>Разработчики и ресурсы</b>\n\n"
-        "Бот создан командой <b>Swill Way</b>.\n\n"
-        "📂 <b>Наш GitHub:</b> <a href='https://github.com/killroite/Lanaev-Search'>Lanaev-Search</a>\n"
-        "🔗 <b>Связь:</b> @ваш_контакт\n\n"
-        "💡 <b>В планах:</b> добавление баз утечек и парсинг соцсетей."
+        "👨‍💻 <b>Разработчики</b>\n\n"
+        "Бот создан командой <b>Swill Way</b>.\n"
+        "📂 <b>GitHub:</b> <a href='https://github.com/killroite/Lanaev-Search'>Lanaev-Search</a>\n"
+        "🔗 <b>Связь:</b> @ceokvist\n\n"
+        "Нажмите кнопку ниже, чтобы узнать о последних обновлениях."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 Журнал обновлений", callback_data="menu_changelog")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
     ])
+    await cb.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query(F.data == "menu_changelog")
+async def menu_changelog(cb: CallbackQuery):
+    await cb.answer()
+    text = (
+        "📜 <b>Последние обновления (v3.0)</b>\n\n"
+        "✅ <b>Добавлено:</b>\n"
+        "├ 🚗 Поиск по Госномеру и VIN (заготовка)\n"
+        "├ 🔑 Генератор UUID\n"
+        "├ 📊 Расширенный анализ Telegram-каналов\n"
+        "└ 🔒 Белый список\n\n"
+        "<i>В планах: база утечек (SQLite) и парсинг соцсетей.</i>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_devs")]])
     await cb.message.edit_text(text, reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_back")
@@ -79,7 +105,13 @@ async def menu_back(cb: CallbackQuery):
         [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
         [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
     ])
-    await cb.message.edit_text("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию ниже:", reply_markup=kb)
+    await cb.message.edit_text("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
+
+@dp.callback_query(F.data == "menu_uuid")
+async def menu_uuid(cb: CallbackQuery):
+    await cb.answer()
+    new_uuid = str(uuid.uuid4())
+    await cb.message.answer(f"🔑 <b>Ваш UUID:</b>\n<code>{new_uuid}</code>")
 
 @dp.callback_query()
 async def cb_handler(cb: CallbackQuery):
@@ -88,12 +120,16 @@ async def cb_handler(cb: CallbackQuery):
         "menu_phone": "Введи номер (+7...)",
         "menu_ip": "Введи IP-адрес",
         "menu_email": "Введи email",
-        "menu_fssp": "Введи ФИО и дату"
+        "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)",
+        "menu_auto": "Введи госномер (А123ВС77) или VIN (17 символов)"
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
 @dp.message(F.text)
 async def handle(m: Message):
+    if not is_allowed(m.from_user.id):
+        return
+        
     q = m.text.strip()
     t = detect_type(q)
 
@@ -102,68 +138,58 @@ async def handle(m: Message):
         if not p.get("valid"):
             await m.answer("❌ Невалидный номер.")
             return
-        
-        text = (
-            f"📱 <b>Анализ номера</b>\n"
-            f"├ <b>Номер:</b> <code>{p['e164']}</code>\n"
-            f"├ <b>Регион:</b> {p['region']}\n"
-            f"└ <b>Оператор:</b> {p['carrier']}\n\n"
-            f"⏳ <i>Проверяю мессенджеры...</i>"
-        )
+        text = f"📱 <b>Анализ номера</b>\n├ <b>Номер:</b> <code>{p['e164']}</code>\n├ <b>Регион:</b> {p['region']}\n└ <b>Оператор:</b> {p['carrier']}\n\n⏳ <i>Проверяю мессенджеры...</i>"
         await m.answer(text)
-        
         mess = await check_messengers(p['e164'])
-        
-        text = "<b>📊 Наличие аккаунтов:</b>\n"
-        text += f"├ Telegram: {mess.get('telegram', '❓')}\n"
-        text += f"├ WhatsApp: {mess.get('whatsapp', '❓')}\n"
-        text += f"├ Viber: {mess.get('viber', '❓')}\n"
-        text += f"└ VK: {mess.get('vk', '❓')}"
+        text = f"<b>📊 Наличие аккаунтов:</b>\n├ Telegram: {mess.get('telegram')}\n├ WhatsApp: {mess.get('whatsapp')}\n├ Viber: {mess.get('viber')}\n└ VK: {mess.get('vk')}"
         await m.answer(text)
         return
 
     if t == "ip":
         await m.answer(f"⏳ <i>Ищу данные по IP <b>{q}</b>...</i>")
         res = await check_ip(q)
-        if "error" in res:
-            await m.answer(f"❌ {res['error']}")
+        if "error" in res: await m.answer(f"❌ {res['error']}")
         else:
-            text = (
-                f"🌐 <b>IP-информация</b>\n"
-                f"├ <b>IP:</b> <code>{res['IP']}</code>\n"
-                f"├ <b>Страна:</b> {res['Страна']}\n"
-                f"├ <b>Город:</b> {res['Город']}\n"
-                f"└ <b>Провайдер:</b> {res['Провайдер']}"
-            )
+            text = f"🌐 <b>IP-информация</b>\n├ <b>IP:</b> <code>{res['IP']}</code>\n├ <b>Страна:</b> {res['Страна']}\n├ <b>Город:</b> {res['Город']}\n└ <b>Провайдер:</b> {res['Провайдер']}"
             await m.answer(text)
         return
 
     if t == "email":
         await m.answer(f"⏳ <i>Проверяю email <b>{q}</b>...</i>")
         res = await check_email(q)
-        if "error" in res:
-            await m.answer(f"❌ {res['error']}")
-        elif "info" in res:
-            await m.answer(f"ℹ️ {res['info']}")
+        if "error" in res: await m.answer(f"❌ {res['error']}")
+        elif "info" in res: await m.answer(f"ℹ️ {res['info']}")
         else:
-            text = (
-                f"📧 <b>Email-информация</b>\n"
-                f"├ <b>Email:</b> <code>{res.get('Email')}</code>\n"
-                f"├ <b>Репутация:</b> {res.get('Репутация')}\n"
-                f"└ <b>Утечки:</b> {res.get('Утечки')}"
-            )
+            text = f"📧 <b>Email-информация</b>\n├ <b>Email:</b> <code>{res.get('Email')}</code>\n├ <b>Репутация:</b> {res.get('Репутация')}\n└ <b>Утечки:</b> {res.get('Утечки')}"
             await m.answer(text)
+        return
+
+    if t == "tg_username":
+        clean_user = q.lstrip("@")
+        try:
+            chat = await bot.get_chat(f"@{clean_user}")
+            chat_type = "Канал" if chat.type == "channel" else "Группа" if chat.type == "supergroup" else "Пользователь"
+            text = f"🕵️ <b>Профиль Telegram ({chat_type})</b>\n├ 🆔 ID: <code>{chat.id}</code>\n"
+            if chat.title: text += f"├ 📛 Название: <b>{chat.title}</b>\n"
+            if chat.username: text += f"├ 🔗 Ссылка: <a href='https://t.me/{chat.username}'>@{chat.username}</a>\n"
+            if chat.description: text += f"└ 📝 Описание: {chat.description[:100]}...\n"
+            await m.answer(text)
+        except Exception:
+            await m.answer("❌ Не найдено.")
         return
 
     if t == "fssp":
         parts = q.split()
         await m.answer(f"⏳ <i>Ищу долги для <b>{' '.join(parts[:-1])}</b>...</i>")
         res = check_fssp(" ".join(parts[:-1]), parts[-1])
-        result = res.get('error') or res.get('info') or '✅ Данные найдены.'
-        await m.answer(f"⚖️ <b>ФССП:</b> {result}")
+        await m.answer(f"⚖️ <b>ФССП:</b> {res.get('error') or res.get('info') or 'Данные найдены.'}")
         return
 
-    await m.answer("🤷‍♂️ Неизвестный запрос. Воспользуйтесь меню /start")
+    if t == "auto" or t == "vin":
+        await m.answer("🚗 <i>В разработке. Для этого требуется платный доступ к базе ГИБДД или API.</i>")
+        return
+
+    await m.answer("🤷‍♂️ Неизвестный запрос.")
 
 async def health(request):
     return web.Response(text="ok")
