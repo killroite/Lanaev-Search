@@ -17,6 +17,7 @@ from modules.fssp import check_fssp
 from modules.ip import check_ip
 from modules.email import check_email
 from modules.messengers import check_messengers
+from modules.sherlock import run_sherlock
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -37,9 +38,7 @@ def detect_type(q: str) -> str:
     if re.match(r"^\+?[\d\s\-()]{7,20}$", q): return "phone"
     if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", q): return "ip"
     if "@" in q and "." in q: return "email"
-    # Госномер РФ (А123ВС77)
     if re.match(r"^[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\d{2,3}$", q, re.IGNORECASE): return "auto"
-    # VIN (17 символов)
     if len(q) == 17 and q.isalnum(): return "vin"
     return "text"
 
@@ -48,7 +47,6 @@ async def start(m: Message):
     if not is_allowed(m.from_user.id):
         await m.answer("⛔ <b>Доступ запрещен.</b>")
         return
-        
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
         [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
@@ -61,6 +59,7 @@ async def menu_tools(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 Номер", callback_data="menu_phone"), InlineKeyboardButton(text="🌐 IP", callback_data="menu_ip")],
         [InlineKeyboardButton(text="📧 Email", callback_data="menu_email"), InlineKeyboardButton(text="⚖️ ФССП", callback_data="menu_fssp")],
+        [InlineKeyboardButton(text="🕵️ Поиск по юзернейму", callback_data="menu_tg")],
         [InlineKeyboardButton(text="🚗 Госномер / VIN", callback_data="menu_auto")],
         [InlineKeyboardButton(text="🔑 Генератор UUID", callback_data="menu_uuid")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
@@ -87,13 +86,13 @@ async def menu_devs(cb: CallbackQuery):
 async def menu_changelog(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "📜 <b>Последние обновления (v3.0)</b>\n\n"
+        "📜 <b>Последние обновления (v4.0)</b>\n\n"
         "✅ <b>Добавлено:</b>\n"
-        "├ 🚗 Поиск по Госномеру и VIN (заготовка)\n"
+        "├ 🕵️ Интеграция Sherlock (поиск аккаунтов по нику)\n"
+        "├ 🚗 Заготовка поиска по Госномеру/VIN\n"
         "├ 🔑 Генератор UUID\n"
-        "├ 📊 Расширенный анализ Telegram-каналов\n"
         "└ 🔒 Белый список\n\n"
-        "<i>В планах: база утечек (SQLite) и парсинг соцсетей.</i>"
+        "<i>В планах: база утечек.</i>"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_devs")]])
     await cb.message.edit_text(text, reply_markup=kb)
@@ -121,7 +120,8 @@ async def cb_handler(cb: CallbackQuery):
         "menu_ip": "Введи IP-адрес",
         "menu_email": "Введи email",
         "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)",
-        "menu_auto": "Введи госномер (А123ВС77) или VIN (17 символов)"
+        "menu_auto": "Введи госномер (А123ВС77) или VIN (17 символов)",
+        "menu_tg": "Введи @username или ник (например, ceokvist)"
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
@@ -129,7 +129,6 @@ async def cb_handler(cb: CallbackQuery):
 async def handle(m: Message):
     if not is_allowed(m.from_user.id):
         return
-        
     q = m.text.strip()
     t = detect_type(q)
 
@@ -169,13 +168,30 @@ async def handle(m: Message):
         try:
             chat = await bot.get_chat(f"@{clean_user}")
             chat_type = "Канал" if chat.type == "channel" else "Группа" if chat.type == "supergroup" else "Пользователь"
+            
             text = f"🕵️ <b>Профиль Telegram ({chat_type})</b>\n├ 🆔 ID: <code>{chat.id}</code>\n"
             if chat.title: text += f"├ 📛 Название: <b>{chat.title}</b>\n"
             if chat.username: text += f"├ 🔗 Ссылка: <a href='https://t.me/{chat.username}'>@{chat.username}</a>\n"
             if chat.description: text += f"└ 📝 Описание: {chat.description[:100]}...\n"
             await m.answer(text)
         except Exception:
-            await m.answer("❌ Не найдено.")
+            await m.answer("❌ Профиль Telegram не найден (или скрыт).")
+
+        # Запускаем Sherlock
+        await m.answer("🔎 <i>Ищу аккаунты с этим ником на других сайтах (Sherlock)... Это займет 15-30 секунд.</i>")
+        sherlock_res = await run_sherlock(clean_user)
+        
+        if "error" in sherlock_res:
+            await m.answer(f"⚠️ Sherlock: {sherlock_res['error']}")
+        elif "info" in sherlock_res:
+            await m.answer(f"🔍 Sherlock: {sherlock_res['info']}")
+        else:
+            text = f"🌐 <b>Найдено на {sherlock_res['total']} сайтах:</b>\n\n"
+            for item in sherlock_res["results"][:10]:
+                text += f"├ <a href='{item['url']}'>{item['site']}</a>\n"
+            if len(sherlock_res["results"]) > 10:
+                text += f"└ <i>...и еще {len(sherlock_res['results']) - 10} сайтов</i>"
+            await m.answer(text)
         return
 
     if t == "fssp":
@@ -186,10 +202,10 @@ async def handle(m: Message):
         return
 
     if t == "auto" or t == "vin":
-        await m.answer("🚗 <i>В разработке. Для этого требуется платный доступ к базе ГИБДД или API.</i>")
+        await m.answer("🚗 <i>В разработке. Требуется платный API.</i>")
         return
 
-    await m.answer("🤷‍♂️ Неизвестный запрос.")
+    await m.answer("🤷‍♂️ Неизвестный запрос. Воспользуйтесь меню /start")
 
 async def health(request):
     return web.Response(text="ok")
