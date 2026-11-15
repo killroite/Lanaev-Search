@@ -1,4 +1,8 @@
- import asyncio, sqlite3, os, re
+import asyncio
+import sqlite3
+import os
+import re
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
@@ -29,7 +33,6 @@ def detect_type(q: str) -> str:
     if "@" in q and "." in q: return "email"
     return "text"
 
-# --- ГЛАВНОЕ МЕНЮ ---
 @dp.message(Command("start"))
 async def start(m: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -43,7 +46,6 @@ async def start(m: Message):
     )
     await m.answer(text, reply_markup=kb)
 
-# --- МЕНЮ ИНСТРУМЕНТЫ ---
 @dp.callback_query(F.data == "menu_tools")
 async def menu_tools(cb: CallbackQuery):
     await cb.answer()
@@ -55,7 +57,6 @@ async def menu_tools(cb: CallbackQuery):
     ])
     await cb.message.edit_text("🔍 <b>Инструменты поиска</b>\n\nВыберите нужный инструмент:", reply_markup=kb)
 
-# --- МЕНЮ РАЗРАБОТЧИКИ ---
 @dp.callback_query(F.data == "menu_devs")
 async def menu_devs(cb: CallbackQuery):
     await cb.answer()
@@ -71,7 +72,6 @@ async def menu_devs(cb: CallbackQuery):
     ])
     await cb.message.edit_text(text, reply_markup=kb)
 
-# --- КНОПКА НАЗАД ---
 @dp.callback_query(F.data == "menu_back")
 async def menu_back(cb: CallbackQuery):
     await cb.answer()
@@ -81,7 +81,6 @@ async def menu_back(cb: CallbackQuery):
     ])
     await cb.message.edit_text("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию ниже:", reply_markup=kb)
 
-# --- КНОПКИ ВНУТРИ ИНСТРУМЕНТОВ ---
 @dp.callback_query()
 async def cb_handler(cb: CallbackQuery):
     await cb.answer()
@@ -93,7 +92,6 @@ async def cb_handler(cb: CallbackQuery):
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
-# --- ОБРАБОТЧИК ЗАПРОСОВ ---
 @dp.message(F.text)
 async def handle(m: Message):
     q = m.text.strip()
