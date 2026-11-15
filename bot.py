@@ -45,7 +45,6 @@ def detect_type(q: str) -> str:
     if "@" in q and "." in q: return "email"
     return "text"
 
-# --- ВИЗУАЛЬНЫЕ РАЗДЕЛИТЕЛИ ---
 LINE = "━━━━━━━━━━━━━━━"
 
 @dp.message(Command("start"))
@@ -60,8 +59,8 @@ async def start(m: Message):
         f"{LINE}\n"
         f"👋 Привет, <b>{m.from_user.first_name}</b>!\n\n"
         f"Я — профессиональный инструмент для поиска открытой информации.\n\n"
-        f"🔹 <b>Инструменты:</b> Поиск по номеру, IP, Email.\n"
-        f"🔹 <b>Жалобы:</b> Сбор доказательств для поддержки.\n"
+        f"🔹 <b>Инструменты:</b> Поиск по номеру, IP, Email, ФИО.\n"
+        f"🔹 <b>Жалобы:</b> Сбор доказательств.\n"
         f"🔹 <b>Разработчики:</b> Связь и обновления.\n"
         f"{LINE}\n"
         f"<i>Выбери действие ниже:</i>"
@@ -74,8 +73,8 @@ async def menu_report(cb: CallbackQuery):
     text = (
         f"🚨 <b>ЦЕНТР ЖАЛОБ</b>\n"
         f"{LINE}\n"
-        f"Этот раздел помогает собрать доказательства на скамеров и мошенников.\n\n"
-        f"Отправь мне @username нарушителя, и я соберу по нему досье и сгенерирую PDF-отчет для поддержки Telegram."
+        f"Этот раздел помогает собрать доказательства на скамеров.\n\n"
+        f"Отправь @username нарушителя, и я соберу досье и сгенерирую PDF."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]])
     await cb.message.edit_text(text, reply_markup=kb)
@@ -92,12 +91,12 @@ async def menu_tools(cb: CallbackQuery):
     text = (
         f"🔍 <b>ИНСТРУМЕНТЫ ПОИСКА</b>\n"
         f"{LINE}\n"
-        f"Выбери нужный инструмент:\n\n"
-        f"📱 <b>Номер</b> — оператор, регион, мессенджеры.\n"
+        f"📱 <b>Номер</b> — оператор и мессенджеры.\n"
         f"🌐 <b>IP</b> — провайдер и геолокация.\n"
         f"📧 <b>Email</b> — репутация и утечки.\n"
         f"⚖️ <b>ФССП</b> — проверка долгов.\n"
-        f"🕵️ <b>Юзернейм</b> — досье и Sherlock."
+        f"🕵️ <b>Юзернейм</b> — досье и Sherlock.\n"
+        f"🔎 <b>Текст</b> — поиск по базе (просто отправь ФИО)."
     )
     await cb.message.edit_text(text, reply_markup=kb)
 
@@ -135,53 +134,64 @@ async def cb_handler(cb: CallbackQuery):
     texts = {
         "menu_phone": "📱 Введи номер в формате <code>+7...</code>",
         "menu_ip": "🌐 Введи IP-адрес (например, <code>8.8.8.8</code>)",
-        "menu_email": "📧 Введи email (например, <code>test@mail.ru</code>)",
-        "menu_fssp": "⚖️ Введи ФИО и дату (например, <code>Иванов Иван 01.01.1990</code>)",
+        "menu_email": "📧 Введи email",
+        "menu_fssp": "⚖️ Введи ФИО и дату",
         "menu_tg": "🕵️ Введи <code>@username</code>"
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
-# --- ФУНКЦИЯ ПОИСКА ПО БАЗЕ ---
+# --- ФУНКЦИЯ ПОИСКА ПО БАЗАМ ---
 async def search_in_base(query: str) -> str:
-    file_url = os.getenv("BASE_TXT_URL")
-    if not file_url:
-        return "❌ Ссылка на базу не настроена."
+    urls = [
+        os.getenv("BASE_TXT_URL"),   
+        os.getenv("BASE_TXT_URL_2")  
+    ]
     
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as resp:
-                if resp.status != 200:
-                    return "❌ Не удалось скачать базу."
-                text = await resp.text()
-        
-        search_q = query.lower().strip()
-        records = text.split("ФИО:")
-        
-        found = []
-        for rec in records:
-            if search_q in rec.lower():
-                found.append("ФИО:" + rec.strip())
-        
-        if not found:
-            return "🔍 Ничего не найдено в базе."
-        
-        result_text = f"<b>📁 Найдено {len(found)} совпадений:</b>\n{LINE}\n\n"
-        for item in found[:3]:
-            result_text += f"├ {item[:400]}...\n\n"
-        return result_text
-        
-    except Exception as e:
-        return f"❌ Ошибка поиска: {str(e)}"
+    search_q = query.lower().strip()
+    all_found = []
+    
+    await asyncio.sleep(0)
+
+    for url in urls:
+        if not url:
+            continue
+            
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        continue
+                    text = await resp.text()
+            
+            records = text.split("ФИО:")
+            
+            for rec in records:
+                if search_q in rec.lower():
+                    all_found.append("ФИО:" + rec.strip())
+                    
+        except Exception:
+            continue
+    
+    if not all_found:
+        return "🔍 Ничего не найдено в базах."
+    
+    unique_found = list(set(all_found))
+    
+    result_text = f"<b>📁 Найдено {len(unique_found)} совпадений:</b>\n{LINE}\n\n"
+    for item in unique_found[:3]:
+        result_text += f"├ {item[:400]}...\n\n"
+    return result_text
 
 @dp.message(F.text)
 async def handle(m: Message):
     q = m.text.strip()
     t = detect_type(q)
 
+    # Поиск по базе
     if t == "text":
         parts = q.split()
         if not (len(parts) >= 3 and any(char.isdigit() for char in parts[-1])):
-            msg = await m.answer("⏳ <i>Ищу в базе...</i>")
+            msg = await m.answer("⏳ <i>Ищу в базах...</i>")
             res = await search_in_base(q)
             await msg.edit_text(res)
             return
@@ -196,7 +206,6 @@ async def handle(m: Message):
         
         mess = await check_messengers(p['e164'])
         
-        # Визуальные индикаторы для мессенджеров
         tg_icon = "🟢" if mess.get('telegram') == "Зарегистрирован" else "🔴"
         wa_icon = "🟢" if mess.get('whatsapp') == "Зарегистрирован" else "🔴"
         vb_icon = "🟢" if mess.get('viber') == "Зарегистрирован" else "🔴"
