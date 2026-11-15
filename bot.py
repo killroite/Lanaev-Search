@@ -4,12 +4,14 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.filters import Command
 from aiohttp import web
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN, DB_PATH
 from modules.phone import analyze_phone
 from modules.fssp import check_fssp
 
-bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
+# Инициализация бота с правильным синтаксисом для aiogram 3.x
+bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 os.makedirs("data", exist_ok=True)
