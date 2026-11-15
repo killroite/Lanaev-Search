@@ -3,6 +3,7 @@ import sqlite3
 import os
 import re
 import uuid
+import time
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
@@ -19,6 +20,7 @@ from modules.email import check_email
 from modules.messengers import check_messengers
 from modules.sherlock import run_sherlock
 from modules.pdf_gen import generate_pdf_report
+from modules.extra_osint import get_avito_link, get_youla_link
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -39,8 +41,6 @@ def detect_type(q: str) -> str:
     if re.match(r"^\+?[\d\s\-()]{7,20}$", q): return "phone"
     if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", q): return "ip"
     if "@" in q and "." in q: return "email"
-    if re.match(r"^[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\d{2,3}$", q, re.IGNORECASE): return "auto"
-    if len(q) == 17 and q.isalnum(): return "vin"
     return "text"
 
 @dp.message(Command("start"))
@@ -48,11 +48,24 @@ async def start(m: Message):
     if not is_allowed(m.from_user.id):
         await m.answer("⛔ <b>Доступ запрещен.</b>")
         return
+        
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
+        [InlineKeyboardButton(text="🚨 Центр Жалоб", callback_data="menu_report")],
         [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
     ])
     await m.answer("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
+
+@dp.callback_query(F.data == "menu_report")
+async def menu_report(cb: CallbackQuery):
+    await cb.answer()
+    text = (
+        "🚨 <b>Центр Жалоб</b>\n\n"
+        "Отправь мне @username нарушителя, и я соберу по нему досье "
+        "и сгенерирую PDF-отчет для поддержки Telegram."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]])
+    await cb.message.edit_text(text, reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_tools")
 async def menu_tools(cb: CallbackQuery):
@@ -61,11 +74,19 @@ async def menu_tools(cb: CallbackQuery):
         [InlineKeyboardButton(text="📱 Номер", callback_data="menu_phone"), InlineKeyboardButton(text="🌐 IP", callback_data="menu_ip")],
         [InlineKeyboardButton(text="📧 Email", callback_data="menu_email"), InlineKeyboardButton(text="⚖️ ФССП", callback_data="menu_fssp")],
         [InlineKeyboardButton(text="🕵️ Поиск по юзернейму", callback_data="menu_tg")],
-        [InlineKeyboardButton(text="🚗 Госномер / VIN", callback_data="menu_auto")],
-        [InlineKeyboardButton(text="🔑 Генератор UUID", callback_data="menu_uuid")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
     ])
     await cb.message.edit_text("🔍 <b>Инструменты поиска</b>:", reply_markup=kb)
+
+@dp.callback_query(F.data == "menu_back")
+async def menu_back(cb: CallbackQuery):
+    await cb.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
+        [InlineKeyboardButton(text="🚨 Центр Жалоб", callback_data="menu_report")],
+        [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
+    ])
+    await cb.message.edit_text("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_devs")
 async def menu_devs(cb: CallbackQuery):
@@ -73,45 +94,10 @@ async def menu_devs(cb: CallbackQuery):
     text = (
         "👨‍💻 <b>Разработчики</b>\n\n"
         "Бот создан командой <b>Swill Way</b>.\n"
-        "📂 <b>GitHub:</b> <a href='https://github.com/killroite/Lanaev-Search'>Lanaev-Search</a>\n"
-        "🔗 <b>Связь:</b> @ceokvist\n\n"
-        "Нажмите кнопку ниже, чтобы узнать о последних обновлениях."
+        "🔗 <b>Связь:</b> @ceokvist"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📜 Журнал обновлений", callback_data="menu_changelog")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
-    ])
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]])
     await cb.message.edit_text(text, reply_markup=kb)
-
-@dp.callback_query(F.data == "menu_changelog")
-async def menu_changelog(cb: CallbackQuery):
-    await cb.answer()
-    text = (
-        "📜 <b>Последние обновления (v5.0)</b>\n\n"
-        "✅ <b>Добавлено:</b>\n"
-        "├ 📄 Генерация PDF-отчета по номеру\n"
-        "├ 🕵️ Интеграция Sherlock\n"
-        "├ 🚗 Заготовка поиска по Госномеру/VIN\n"
-        "└ 🔒 Белый список\n\n"
-        "<i>В планах: база утечек.</i>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_devs")]])
-    await cb.message.edit_text(text, reply_markup=kb)
-
-@dp.callback_query(F.data == "menu_back")
-async def menu_back(cb: CallbackQuery):
-    await cb.answer()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Инструменты", callback_data="menu_tools")],
-        [InlineKeyboardButton(text="👨‍💻 Разработчики", callback_data="menu_devs")]
-    ])
-    await cb.message.edit_text("🛡 <b>SWILL OSINT BOT</b>\n\nВыберите категорию:", reply_markup=kb)
-
-@dp.callback_query(F.data == "menu_uuid")
-async def menu_uuid(cb: CallbackQuery):
-    await cb.answer()
-    new_uuid = str(uuid.uuid4())
-    await cb.message.answer(f"🔑 <b>Ваш UUID:</b>\n<code>{new_uuid}</code>")
 
 @dp.callback_query()
 async def cb_handler(cb: CallbackQuery):
@@ -120,9 +106,8 @@ async def cb_handler(cb: CallbackQuery):
         "menu_phone": "Введи номер (+7...)",
         "menu_ip": "Введи IP-адрес",
         "menu_email": "Введи email",
-        "menu_fssp": "Введи ФИО и дату (Иванов Иван 01.01.1990)",
-        "menu_auto": "Введи госномер (А123ВС77) или VIN (17 символов)",
-        "menu_tg": "Введи @username или ник (например, ceokvist)"
+        "menu_fssp": "Введи ФИО и дату",
+        "menu_tg": "Введи @username"
     }
     await cb.message.answer(texts.get(cb.data, "Неизвестная команда"))
 
@@ -130,6 +115,7 @@ async def cb_handler(cb: CallbackQuery):
 async def handle(m: Message):
     if not is_allowed(m.from_user.id):
         return
+        
     q = m.text.strip()
     t = detect_type(q)
 
@@ -139,6 +125,7 @@ async def handle(m: Message):
             await m.answer("❌ Невалидный номер.")
             return
         
+        # 1. Базовый анализ
         text = (
             f"📱 <b>Анализ номера</b>\n"
             f"├ <b>Номер:</b> <code>{p['e164']}</code>\n"
@@ -148,31 +135,27 @@ async def handle(m: Message):
         )
         await m.answer(text)
         
+        # 2. Мессенджеры
         mess = await check_messengers(p['e164'])
+        mess_text = (
+            "<b>📊 Наличие аккаунтов:</b>\n"
+            f"├ Telegram: {mess.get('telegram', '❓')}\n"
+            f"├ WhatsApp: {mess.get('whatsapp', '❓')}\n"
+            f"├ Viber: {mess.get('viber', '❓')}\n"
+            f"└ VK: {mess.get('vk', '❓')}"
+        )
+        await m.answer(mess_text)
+
+        # 3. Ссылки на объявления (Avito, Youla)
+        avito = await get_avito_link(p['e164'])
+        youla = await get_youla_link(p['e164'])
         
-        text = "<b>📊 Наличие аккаунтов:</b>\n"
-        text += f"├ Telegram: {mess.get('telegram', '❓')}\n"
-        text += f"├ WhatsApp: {mess.get('whatsapp', '❓')}\n"
-        text += f"├ Viber: {mess.get('viber', '❓')}\n"
-        text += f"└ VK: {mess.get('vk', '❓')}"
-        await m.answer(text)
-        
-        # --- ГЕНЕРАЦИЯ PDF ---
-        report_data = {
-            "Номер": p['e164'],
-            "Регион": p['region'],
-            "Оператор": p['carrier'],
-            "Telegram": mess.get('telegram'),
-            "WhatsApp": mess.get('whatsapp'),
-            "Viber": mess.get('viber'),
-            "VK": mess.get('vk')
-        }
-        
-        filepath = generate_pdf_report(p['e164'], report_data)
-        await m.answer_document(FSInputFile(filepath), caption="📄 <b>PDF-отчет готов!</b>")
-        
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        links_text = (
+            "<b>🔗 Поиск объявлений:</b>\n"
+            f"├ <a href='{avito}'>Avito</a>\n"
+            f"└ <a href='{youla}'>Youla</a>"
+        )
+        await m.answer(links_text)
         return
 
     if t == "ip":
@@ -195,32 +178,47 @@ async def handle(m: Message):
         return
 
     if t == "tg_username":
+        # Логика сбора досье и Sherlock (остается без изменений)
         clean_user = q.lstrip("@")
+        await m.answer(f"⏳ <i>Собираю досье на @{clean_user}...</i>")
+        
+        tg_data = {}
         try:
             chat = await bot.get_chat(f"@{clean_user}")
-            chat_type = "Канал" if chat.type == "channel" else "Группа" if chat.type == "supergroup" else "Пользователь"
-            text = f"🕵️ <b>Профиль Telegram ({chat_type})</b>\n├ 🆔 ID: <code>{chat.id}</code>\n"
-            if chat.title: text += f"├ 📛 Название: <b>{chat.title}</b>\n"
-            if chat.username: text += f"├ 🔗 Ссылка: <a href='https://t.me/{chat.username}'>@{chat.username}</a>\n"
-            if chat.description: text += f"└ 📝 Описание: {chat.description[:100]}...\n"
-            await m.answer(text)
+            tg_data = {
+                "ID": chat.id,
+                "Имя": chat.title or chat.full_name,
+                "Юзернейм": f"@{chat.username}" if chat.username else "Скрыт",
+                "Описание": chat.description[:100] + "..." if chat.description else "Нет",
+                "Тип": chat.type
+            }
         except Exception:
-            await m.answer("❌ Профиль Telegram не найден (или скрыт).")
+            tg_data = {"Ошибка": "Профиль не найден или удален"}
 
-        await m.answer("🔎 <i>Ищу аккаунты с этим ником на других сайтах (Sherlock)... Это займет 15-30 секунд.</i>")
+        await m.answer("🔎 <i>Проверяю наличие аккаунта на других платформах (Sherlock)...</i>")
         sherlock_res = await run_sherlock(clean_user)
         
-        if "error" in sherlock_res:
-            await m.answer(f"⚠️ Sherlock: {sherlock_res['error']}")
-        elif "info" in sherlock_res:
-            await m.answer(f"🔍 Sherlock: {sherlock_res['info']}")
-        else:
-            text = f"🌐 <b>Найдено на {sherlock_res['total']} сайтах:</b>\n\n"
-            for item in sherlock_res["results"][:10]:
-                text += f"├ <a href='{item['url']}'>{item['site']}</a>\n"
-            if len(sherlock_res["results"]) > 10:
-                text += f"└ <i>...и еще {len(sherlock_res['results']) - 10} сайтов</i>"
-            await m.answer(text)
+        sherlock_text = "Не найден на других сайтах."
+        if "results" in sherlock_res:
+            sites = [item['site'] for item in sherlock_res['results'][:5]]
+            sherlock_text = f"Найден на {sherlock_res['total']} сайтах: {', '.join(sites)}."
+
+        report_data = {
+            "Объект": clean_user,
+            "Telegram ID": tg_data.get("ID", "—"),
+            "Имя/Название": tg_data.get("Имя", "—"),
+            "Описание": tg_data.get("Описание", "—"),
+            "Следы в сети (Sherlock)": sherlock_text,
+            "Ссылка на профиль": f"https://t.me/{clean_user}",
+            "Рекомендация": "Отправить жалобу в поддержку Telegram, приложив этот отчет."
+        }
+        
+        filepath = generate_pdf_report(clean_user, report_data)
+        caption = f"📄 <b>Досье на @{clean_user} готово!</b>\nДля жалобы перейди: https://telegram.org/support"
+        await m.answer_document(FSInputFile(filepath), caption=caption)
+        
+        if os.path.exists(filepath):
+            os.remove(filepath)
         return
 
     if t == "fssp":
@@ -230,11 +228,7 @@ async def handle(m: Message):
         await m.answer(f"⚖️ <b>ФССП:</b> {res.get('error') or res.get('info') or 'Данные найдены.'}")
         return
 
-    if t == "auto" or t == "vin":
-        await m.answer("🚗 <i>В разработке. Требуется платный API.</i>")
-        return
-
-    await m.answer("🤷‍♂️ Неизвестный запрос.")
+    await m.answer("🤷‍♂️ Неизвестный запрос. Воспользуйтесь меню /start")
 
 async def health(request):
     return web.Response(text="ok")
