@@ -5,7 +5,7 @@ import re
 import uuid
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.filters import Command
 from aiohttp import web
 from aiogram.enums import ParseMode
@@ -18,6 +18,7 @@ from modules.ip import check_ip
 from modules.email import check_email
 from modules.messengers import check_messengers
 from modules.sherlock import run_sherlock
+from modules.pdf_gen import generate_pdf_report
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -27,7 +28,7 @@ conn = sqlite3.connect(DB_PATH)
 conn.execute("""CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, query TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 conn.commit()
 
-ALLOWED_IDS = [6847416129] 
+ALLOWED_IDS = [6847416129]
 
 def is_allowed(user_id: int) -> bool:
     return user_id in ALLOWED_IDS
@@ -86,11 +87,11 @@ async def menu_devs(cb: CallbackQuery):
 async def menu_changelog(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "📜 <b>Последние обновления (v4.0)</b>\n\n"
+        "📜 <b>Последние обновления (v5.0)</b>\n\n"
         "✅ <b>Добавлено:</b>\n"
-        "├ 🕵️ Интеграция Sherlock (поиск аккаунтов по нику)\n"
+        "├ 📄 Генерация PDF-отчета по номеру\n"
+        "├ 🕵️ Интеграция Sherlock\n"
         "├ 🚗 Заготовка поиска по Госномеру/VIN\n"
-        "├ 🔑 Генератор UUID\n"
         "└ 🔒 Белый список\n\n"
         "<i>В планах: база утечек.</i>"
     )
@@ -137,11 +138,41 @@ async def handle(m: Message):
         if not p.get("valid"):
             await m.answer("❌ Невалидный номер.")
             return
-        text = f"📱 <b>Анализ номера</b>\n├ <b>Номер:</b> <code>{p['e164']}</code>\n├ <b>Регион:</b> {p['region']}\n└ <b>Оператор:</b> {p['carrier']}\n\n⏳ <i>Проверяю мессенджеры...</i>"
+        
+        text = (
+            f"📱 <b>Анализ номера</b>\n"
+            f"├ <b>Номер:</b> <code>{p['e164']}</code>\n"
+            f"├ <b>Регион:</b> {p['region']}\n"
+            f"└ <b>Оператор:</b> {p['carrier']}\n\n"
+            f"⏳ <i>Проверяю мессенджеры...</i>"
+        )
         await m.answer(text)
+        
         mess = await check_messengers(p['e164'])
-        text = f"<b>📊 Наличие аккаунтов:</b>\n├ Telegram: {mess.get('telegram')}\n├ WhatsApp: {mess.get('whatsapp')}\n├ Viber: {mess.get('viber')}\n└ VK: {mess.get('vk')}"
+        
+        text = "<b>📊 Наличие аккаунтов:</b>\n"
+        text += f"├ Telegram: {mess.get('telegram', '❓')}\n"
+        text += f"├ WhatsApp: {mess.get('whatsapp', '❓')}\n"
+        text += f"├ Viber: {mess.get('viber', '❓')}\n"
+        text += f"└ VK: {mess.get('vk', '❓')}"
         await m.answer(text)
+        
+        # --- ГЕНЕРАЦИЯ PDF ---
+        report_data = {
+            "Номер": p['e164'],
+            "Регион": p['region'],
+            "Оператор": p['carrier'],
+            "Telegram": mess.get('telegram'),
+            "WhatsApp": mess.get('whatsapp'),
+            "Viber": mess.get('viber'),
+            "VK": mess.get('vk')
+        }
+        
+        filepath = generate_pdf_report(p['e164'], report_data)
+        await m.answer_document(FSInputFile(filepath), caption="📄 <b>PDF-отчет готов!</b>")
+        
+        if os.path.exists(filepath):
+            os.remove(filepath)
         return
 
     if t == "ip":
@@ -168,7 +199,6 @@ async def handle(m: Message):
         try:
             chat = await bot.get_chat(f"@{clean_user}")
             chat_type = "Канал" if chat.type == "channel" else "Группа" if chat.type == "supergroup" else "Пользователь"
-            
             text = f"🕵️ <b>Профиль Telegram ({chat_type})</b>\n├ 🆔 ID: <code>{chat.id}</code>\n"
             if chat.title: text += f"├ 📛 Название: <b>{chat.title}</b>\n"
             if chat.username: text += f"├ 🔗 Ссылка: <a href='https://t.me/{chat.username}'>@{chat.username}</a>\n"
@@ -177,7 +207,6 @@ async def handle(m: Message):
         except Exception:
             await m.answer("❌ Профиль Telegram не найден (или скрыт).")
 
-        # Запускаем Sherlock
         await m.answer("🔎 <i>Ищу аккаунты с этим ником на других сайтах (Sherlock)... Это займет 15-30 секунд.</i>")
         sherlock_res = await run_sherlock(clean_user)
         
@@ -205,7 +234,7 @@ async def handle(m: Message):
         await m.answer("🚗 <i>В разработке. Требуется платный API.</i>")
         return
 
-    await m.answer("🤷‍♂️ Неизвестный запрос. Воспользуйтесь меню /start")
+    await m.answer("🤷‍♂️ Неизвестный запрос.")
 
 async def health(request):
     return web.Response(text="ok")
